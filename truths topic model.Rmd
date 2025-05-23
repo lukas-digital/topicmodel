@@ -1,0 +1,279 @@
+---
+title: "truths Topic Model"
+output: 
+  html_document:
+    self_contained: true
+date: "2025-03-27"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+knitr::opts_knit$set(root.dir = "/Users/lukaslehmann/Desktop/Tariff-Comparison-Blog")
+
+pacman::p_load(tidyverse, ggplot2, utils, tm, SnowballC, caTools, 
+               rpart, topicmodels, tidytext, wordcloud, lexicon, reshape2,
+               sentimentr, textmineR, ggtext, janitor, stringdist)
+
+library(dplyr)
+library(tidyr)
+library(knitr)
+library(kableExtra)
+
+#load data
+# truths_df <- read_csv("truths_text.csv") %>%
+#   clean_names()
+
+truths_df <- read_csv("data/all_truths.csv") %>%
+  clean_names() %>%
+  filter(!is.na(content), str_trim(content) != "") %>%
+  distinct(content, .keep_all = TRUE) %>%
+  filter(as.Date(date) >= as.Date("2025-04-02"))
+
+
+truths_df <- truths_df %>%
+  mutate(content_start = substr(content, 1, 30)) %>%
+  distinct(content_start, .keep_all = TRUE) %>%
+  select(-content_start)  # clean up helper column
+
+
+```
+
+```{r prepare content}
+
+corpus1 <- Corpus(VectorSource(truths_df$content))
+corpus1 <- tm_map(corpus1, tolower)
+corpus1 <- tm_map(corpus1, removePunctuation)
+#We need to remove stop words to get meaningful results from this exercise. 
+#We'll remove words like "me", "is", "was"
+# stopwords("english")[1:50]
+corpus1 <- tm_map(corpus1, removeWords, (stopwords("english")))
+#We need to clean the words in the corpus further by "stemming" words
+#A word like "understand" and "understands" will both become "understand"
+corpus1 <- tm_map(corpus1, stemDocument)
+#creates a document term matrix, which is necessary for building a topic model
+DTM1 <- DocumentTermMatrix(corpus1)
+#Here we can see the most frequently used terms
+frequent_ge_20 <- findFreqTerms(DTM1, lowfreq = 100)
+frequent_ge_20
+
+
+```
+
+
+```{r perplexity}
+
+k_list <- seq(2, 20, by = 2) # You can change this range
+
+perplexities <- c()
+
+for (k in k_list) {
+  lda_model <- LDA(DTM1, k = k, control = list(seed = 1234))
+  perplexity_k <- perplexity(lda_model, DTM1)
+  perplexities <- c(perplexities, perplexity_k)
+}
+
+# Plot perplexity vs number of topics
+plot(k_list, perplexities, type = "b", pch = 19,
+     xlab = "Number of Topics (k)", ylab = "Perplexity",
+     main = "Perplexity vs Number of Topics")
+
+
+# # Create a table
+# perplexity_table <- data.frame(
+#   `Number of Topics (k)` = k_list,
+#   `Perplexity` = perplexities
+# )
+# # Print the table
+# print(perplexity_table)
+```
+
+```{r coherence}
+# 
+# dtm_tm <- as.matrix(DTM1)
+# # Create a TCM (term co-occurrence matrix) if needed
+# # Fit multiple models and evaluate coherence
+# k_list <- seq(2, 20, 2)
+# coherence_scores <- c()
+# 
+# for (k in k_list) {
+#   lda_model <- FitLdaModel(dtm_tm, k = k, iterations = 500, burnin = 180,
+#                            alpha = 0.1, beta = 0.05, optimize_alpha = TRUE,
+#                            calc_likelihood = TRUE, calc_coherence = TRUE)
+#   coherence_scores <- c(coherence_scores, mean(lda_model$coherence))
+# }
+# 
+# plot(k_list, coherence_scores, type = "b", pch = 19,
+#      xlab = "Number of Topics (k)", ylab = "Mean Coherence",
+#      main = "Topic Coherence vs Number of Topics")
+
+
+```
+
+```{r topic model with 4 topics}
+
+#Perform LDA topic modeling on a Document-Term Matrix (DTM) with 7 topics
+truths_lda1 <- LDA(DTM1, k = 8, control = list(seed = 1234))
+
+#Print the model summary
+truths_lda1
+
+#Convert the model's beta matrix to a tidy format
+truths_topics1 <- tidy(truths_lda1, matrix = "beta")
+
+truths_top_terms1 <- truths_topics1 %>%
+  group_by(topic) %>% #Group the terms by topic
+  slice_max(beta, n = 10) %>% #Top 10 terms with the highest probabilities
+  ungroup() %>% #Remove the grouping attribute from the data frame
+  arrange(topic, -beta) #Sort the data frame by topic index and term probability
+
+```
+
+```{r}
+#Reorder the terms within each topic based on their probability (beta) values
+truths_top_terms1 %>%
+  mutate(term = reorder_within(term, beta, topic)) %>%
+  # Create a bar plot of the term probabilities for each topic
+  ggplot(aes(beta, term, fill = factor(topic))) +
+  geom_col(show.legend = FALSE, width = 0.8) +
+  scale_fill_manual(values = c("#01006a", "#182cfd", "#ff3c42", "#595959", 
+                               "#7a1619", "#7C9BFF", "#a7bfcf", "#f4f4f4", 
+                               "#ffffff", "#000000", "brown", "purple", "pink", "orange")) +
+  theme_minimal() +
+  # Create separate plots for each topic and adjust the y-axis limits for each plot
+  facet_wrap(~ topic, scales = "free", ncol = 2, strip.position = "bottom") +
+  theme(strip.background = element_blank(),
+        strip.text = element_text(size = 12, face = "bold")) +
+  # Apply a custom scale for the y-axis that preserves the within-topic ordering of terms
+  scale_y_reordered(expand = c(0, 0)) +
+  labs(title = "Top 10 Terms by Topic",
+       x = "Term Probability",
+       y = NULL,
+       caption = "Source: LDA Topic Model of truths Tweets")
+
+```
+
+```{r gamma values}
+
+# Get the gamma (document-topic) matrix in tidy format
+truths_gamma1 <- tidy(truths_lda1, matrix = "gamma")
+
+# Add document index to your data
+truths_df$document <- as.character(1:nrow(truths_df))
+
+# Join gamma with the original text
+gamma_with_text <- truths_gamma1 %>%
+  left_join(truths_df, by = c("document"))
+
+top_topic_per_doc <- gamma_with_text %>%
+  group_by(document) %>%
+  slice_max(order_by = gamma, n = 1) %>%
+  ungroup()
+
+
+####### data for flourish
+# Filter out topics 1 and 13
+top_topic_filtered <- top_topic_per_doc
+
+# Count documents per remaining topic
+topic_counts <- top_topic_filtered %>%
+  count(topic, sort = TRUE)
+
+# View the result
+print(topic_counts)
+
+
+
+
+```
+
+
+```{r table display}
+
+# Filter for gamma > 0.7
+high_gamma <- gamma_with_text %>%
+  filter(gamma > 0.9)
+
+# Randomly sample 10 posts per topic
+sampled_posts <- high_gamma %>%
+  group_by(topic) %>%
+  slice_sample(n = 20, replace = FALSE) %>%
+  ungroup()
+
+# Optional: Clean up columns for display
+sampled_posts_clean <- sampled_posts %>%
+  select(topic, document, gamma, content) %>%
+  mutate(gamma = round(gamma, 3))
+
+# # Create a list of tables (one for each topic)
+# tables_by_topic <- sampled_posts_clean %>%
+#   group_split(topic) %>%
+#   setNames(paste0("Topic ", unique(sampled_posts_clean$topic)))
+
+# Create grouped data
+# Group and split once
+grouped_data <- sampled_posts_clean %>% 
+  group_by(topic)
+
+# Split and get names in sync
+tables_by_topic <- grouped_data %>% 
+  group_split() %>% 
+  setNames(paste0("Topic ", group_keys(grouped_data)$topic))
+
+
+```
+
+## Topic 1
+
+```{r}
+kable(tables_by_topic[["Topic 1"]], format = "html", escape = TRUE) %>%
+  kable_styling("striped", full_width = FALSE)
+```
+
+## Topic 2
+
+```{r}
+kable(tables_by_topic[["Topic 2"]], format = "html", escape = TRUE) %>%
+  kable_styling("striped", full_width = FALSE)
+```
+
+## Topic 3
+
+```{r}
+kable(tables_by_topic[["Topic 3"]], format = "html", escape = TRUE) %>%
+  kable_styling("striped", full_width = FALSE)
+```
+
+## Topic 4
+
+```{r}
+kable(tables_by_topic[["Topic 4"]], format = "html", escape = TRUE) %>%
+  kable_styling("striped", full_width = FALSE)
+```
+
+## Topic 5
+
+```{r}
+kable(tables_by_topic[["Topic 5"]], format = "html", escape = TRUE) %>%
+  kable_styling("striped", full_width = FALSE)
+```
+
+## Topic 6
+
+```{r}
+kable(tables_by_topic[["Topic 6"]], format = "html", escape = TRUE) %>%
+  kable_styling("striped", full_width = FALSE)
+```
+
+## Topic 7
+
+```{r}
+kable(tables_by_topic[["Topic 7"]], format = "html", escape = TRUE) %>%
+  kable_styling("striped", full_width = FALSE)
+```
+
+## Topic 8
+
+```{r}
+kable(tables_by_topic[["Topic 8"]], format = "html", escape = TRUE) %>%
+  kable_styling("striped", full_width = FALSE)
+```
