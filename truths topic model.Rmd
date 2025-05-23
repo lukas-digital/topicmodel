@@ -23,7 +23,7 @@ library(kableExtra)
 # truths_df <- read_csv("truths_text.csv") %>%
 #   clean_names()
 
-truths_df <- read_csv("data/all_truths.csv") %>%
+truths_df <- read_csv("all_truths.csv") %>%
   clean_names() %>%
   filter(!is.na(content), str_trim(content) != "") %>%
   distinct(content, .keep_all = TRUE) %>%
@@ -109,7 +109,7 @@ plot(k_list, perplexities, type = "b", pch = 19,
 
 ```
 
-```{r topic model with 4 topics}
+```{r topic model with 8 topics}
 
 #Perform LDA topic modeling on a Document-Term Matrix (DTM) with 7 topics
 truths_lda1 <- LDA(DTM1, k = 8, control = list(seed = 1234))
