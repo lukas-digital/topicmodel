@@ -23,7 +23,7 @@ library(kableExtra)
 # truths_df <- read_csv("truths_text.csv") %>%
 #   clean_names()
 
-truths_df <- read_csv("all_truths.csv") %>%
+truths_df <- read_csv("all_truths.csv") %>% #THIS IS WHERE THE DATA COMES FROM
   clean_names() %>%
   filter(!is.na(content), str_trim(content) != "") %>%
   distinct(content, .keep_all = TRUE) %>%
